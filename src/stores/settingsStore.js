@@ -29,6 +29,35 @@ const defaultValue = {
   interfaceFontSize: "16",
   showIndicator: true,
   floatingSidebar: false,
+  // AI 总结设置
+  aiEnabled: false,
+  aiEndpoint: "https://api.openai.com/v1/chat/completions",
+  aiApiKey: "",
+  aiModel: "gpt-4o-mini",
+  aiSummaryPrompt: `## 📰 情报分析
+
+### 1. 核心逻辑链 (300字以内)
+- **[起因]**: 简述引发事件的直接原因或背景矛盾
+- **[动态]**: 核心事件是什么，谁做了什么
+- **[影响]**: 事件导致的直接后果或潜在趋势
+
+### 2. 关键背景注解
+- **[人物/实体名称]**: 一句话解释身份及关键作用
+- **[地缘/事件概念]**: 一句话解释定义或历史背景
+
+### 3. 延伸思考 (可选)
+- 这对中国/中国读者意味着什么？
+- 后续可能的发展走向？`,
+  // 翻译设置
+  translateEnabled: false,
+  translateProvider: "ai", // 'ai' | 'google'
+  targetLanguage: "zh",
+  translateDisplayMode: "bilingual", // 'bilingual' | 'translated'
+  // MCP 全文抓取设置
+  mcpEnabled: false,
+  mcpEndpoint: "http://usa2.190904.xyz:8766/mcp",
+  // 繁简转换设置（默认开启）
+  t2sEnabled: true,
 };
 
 export const settingsState = persistentAtom("settings", defaultValue, {

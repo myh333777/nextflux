@@ -1,5 +1,68 @@
 import Dexie from "dexie";
 
+// Safari IndexedDB 修复 - 检测并等待 IndexedDB 可用
+const waitForIndexedDB = () => {
+  return new Promise((resolve, reject) => {
+    // 检测 Safari
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+    if (!isSafari) {
+      resolve();
+      return;
+    }
+
+    // Safari 需要延迟初始化 IndexedDB
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const tryOpen = () => {
+      attempts++;
+      try {
+        const testRequest = indexedDB.open("_test_db_", 1);
+
+        testRequest.onerror = () => {
+          console.warn(`Safari IndexedDB test failed, attempt ${attempts}`);
+          if (attempts < maxAttempts) {
+            setTimeout(tryOpen, 100);
+          } else {
+            reject(new Error("IndexedDB unavailable"));
+          }
+        };
+
+        testRequest.onsuccess = () => {
+          testRequest.result.close();
+          indexedDB.deleteDatabase("_test_db_");
+          console.log(`Safari IndexedDB ready after ${attempts} attempts`);
+          resolve();
+        };
+
+        // 超时处理 - Safari 有时 request 会挂起
+        setTimeout(() => {
+          if (attempts < maxAttempts && !testRequest.result) {
+            console.warn(`Safari IndexedDB timeout, retrying...`);
+            tryOpen();
+          }
+        }, 500);
+
+      } catch (e) {
+        if (attempts < maxAttempts) {
+          setTimeout(tryOpen, 100);
+        } else {
+          reject(e);
+        }
+      }
+    };
+
+    // 添加短暂延迟再开始尝试
+    setTimeout(tryOpen, 50);
+  });
+};
+
+// 初始化 Safari 修复
+waitForIndexedDB().catch(e => {
+  console.error("IndexedDB initialization failed:", e);
+});
+
 // 创建数据库
 const db = new Dexie("minifluxReader");
 
@@ -20,6 +83,11 @@ db.open().catch((err) => {
       console.log("数据库已重置");
       window.location.reload(); // 刷新页面重新初始化数据库
     });
+  }
+  // Safari 特定错误处理
+  if (err.name === "InvalidStateError" || err.message?.includes("Internal")) {
+    console.warn("Safari IndexedDB error, will retry...");
+    setTimeout(() => window.location.reload(), 1000);
   }
 });
 

@@ -20,6 +20,7 @@ import { Ripple, useRipple } from "@heroui/react";
 import FeedIcon from "@/components/ui/FeedIcon.jsx";
 import { useTranslation } from "react-i18next";
 import { ContextMenu, ContextMenuItem } from "@/components/ui/ContextMenu";
+import { traditionalToSimplified } from "@/utils/t2s.js";
 
 export default function ArticleCard({ article }) {
   const { t } = useTranslation();
@@ -34,6 +35,7 @@ export default function ArticleCard({ article }) {
     showReadingTime,
     textPreviewLines,
     titleLines,
+    t2sEnabled,
   } = useStore(settingsState);
   const hasBeenVisible = useRef(false);
   const { ripples, onClear, onPress } = useRipple();
@@ -45,13 +47,19 @@ export default function ArticleCard({ article }) {
   const imageUrl = useMemo(() => extractFirstImage(article), [article]);
   const feedTitle = useMemo(() => {
     const feed = $feeds.find((f) => f.id === article.feedId);
-    return feed?.title || article.feedId;
-  }, [article.feedId, $feeds]);
+    const title = feed?.title || article.feedId;
+    return t2sEnabled !== false ? traditionalToSimplified(title) : title;
+  }, [article.feedId, $feeds, t2sEnabled]);
 
-  const previewContent = useMemo(
-    () => extractTextFromHtml(article.content).slice(0, 300),
-    [article.content],
-  );
+  const previewContent = useMemo(() => {
+    const text = extractTextFromHtml(article.content).slice(0, 300);
+    return t2sEnabled !== false ? traditionalToSimplified(text) : text;
+  }, [article.content, t2sEnabled]);
+
+  const displayTitle = useMemo(() => {
+    const title = cleanTitle(article.title);
+    return t2sEnabled !== false ? traditionalToSimplified(title) : title;
+  }, [article.title, t2sEnabled]);
 
   useEffect(() => {
     // 如果文章已读或未启用滚动标记已读,则不需要观察
@@ -145,7 +153,7 @@ export default function ArticleCard({ article }) {
           "bg-transparent contain-content",
           "hover:bg-background/70",
           parseInt(articleId) === article.id &&
-            "bg-background/70 shadow-custom",
+          "bg-background/70 shadow-custom",
         )}
         data-article-id={article.id}
         onClick={handleClick}
@@ -201,7 +209,7 @@ export default function ArticleCard({ article }) {
                     WebkitLineClamp: titleLines === 0 ? "none" : titleLines,
                   }}
                 >
-                  {cleanTitle(article.title)}
+                  {displayTitle}
                 </h3>
                 {showReadingTime && (
                   <div className="text-xs text-default-500 flex items-center gap-1">

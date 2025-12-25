@@ -27,10 +27,18 @@ import { cn, getHostname } from "@/lib/utils.js";
 import FeedIcon from "@/components/ui/FeedIcon.jsx";
 import { getArticleById } from "@/db/storage";
 import Attachments from "@/components/ArticleView/components/Attachments.jsx";
+import ArticleSummary from "@/components/ArticleView/components/ArticleSummary.jsx";
+import ArticleToolbar from "@/components/ArticleView/components/ArticleToolbar.jsx";
+import { convertHtmlToSimplified, traditionalToSimplified } from "@/utils/t2s.js";
+
 const ArticleView = () => {
   const { t } = useTranslation();
   const { articleId } = useParams();
   const [error, setError] = useState(null);
+  // 翻译后的内容
+  const [translatedContent, setTranslatedContent] = useState(null);
+  // MCP 获取的全文内容
+  const [mcpContent, setMcpContent] = useState(null);
   const $activeArticle = useStore(activeArticle);
   const $filteredArticles = useStore(filteredArticles);
   const {
@@ -43,6 +51,7 @@ const ArticleView = () => {
     titleAlignType,
     reduceMotion,
     floatingSidebar,
+    t2sEnabled,
   } = useStore(settingsState);
   const { lightTheme } = useStore(themeState);
   const $currentThemeMode = useStore(currentThemeMode);
@@ -95,8 +104,22 @@ const ArticleView = () => {
       }
     };
 
+    // 重置翻译和 MCP 内容
+    setTranslatedContent(null);
+    setMcpContent(null);
+
     loadArticleByArticleId();
   }, [articleId, $filteredArticles]);
+
+  // 获取当前显示的内容（繁简转换）- 默认开启
+  const rawContent = translatedContent || mcpContent || $activeArticle?.content;
+  const shouldConvertT2S = t2sEnabled !== false; // 默认为 true
+  const displayContent = shouldConvertT2S ? convertHtmlToSimplified(rawContent) : rawContent;
+
+  // 处理 MCP 全文更新
+  const handleMcpContentUpdate = (content) => {
+    setMcpContent(content);
+  };
 
   const handleLinkWithImg = (domNode) => {
     const imgNodes = domNode.children.filter(
@@ -235,7 +258,7 @@ const ArticleView = () => {
                         rel="noopener noreferrer"
                         target="_blank"
                       >
-                        {cleanTitle($activeArticle?.title)}
+                        {shouldConvertT2S ? traditionalToSimplified(cleanTitle($activeArticle?.title)) : cleanTitle($activeArticle?.title)}
                       </a>
                     </h1>
                     <div className="text-default-400 text-sm">
@@ -248,6 +271,18 @@ const ArticleView = () => {
                     </div>
                   </header>
                   <Divider className="my-4" />
+                  {/* AI 摘要组件 - 使用 MCP 获取的内容（如有）*/}
+                  <ArticleSummary
+                    content={mcpContent || $activeArticle?.content}
+                    title={$activeArticle?.title}
+                  />
+                  {/* 工具栏：翻译 + 全文获取 */}
+                  <ArticleToolbar
+                    articleUrl={$activeArticle?.url}
+                    articleContent={mcpContent || $activeArticle?.content}
+                    onContentUpdate={handleMcpContentUpdate}
+                    onTranslatedContentUpdate={setTranslatedContent}
+                  />
                   {audioEnclosure && (
                     <PlayAndPause
                       source={audioEnclosure}
@@ -276,7 +311,7 @@ const ArticleView = () => {
                         textAlign: alignJustify ? "justify" : "left",
                       }}
                     >
-                      {parse($activeArticle?.content, {
+                      {parse(displayContent || '', {
                         replace(domNode) {
                           if (
                             domNode.type === "tag" &&
