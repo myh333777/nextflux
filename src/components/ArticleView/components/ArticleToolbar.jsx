@@ -125,24 +125,22 @@ const ArticleToolbar = ({
 
             {/* MCP 全文抓取按钮 */}
             {showMCP && (
-                <Tooltip content="通过 MCP 获取完整文章内容（绕过付费墙）">
-                    <Button
-                        size="sm"
-                        variant="flat"
-                        color={fetchSuccess ? "success" : "primary"}
-                        isLoading={isFetching}
-                        onPress={handleFetchFullContent}
-                        startContent={
-                            fetchSuccess ? (
-                                <Check className="size-4" />
-                            ) : !isFetching ? (
-                                <FileText className="size-4" />
-                            ) : null
-                        }
-                    >
-                        {isFetching ? "抓取中..." : fetchSuccess ? "已获取" : "获取全文"}
-                    </Button>
-                </Tooltip>
+                <Button
+                    size="sm"
+                    variant="flat"
+                    color={fetchSuccess ? "success" : "primary"}
+                    isLoading={isFetching}
+                    onPress={handleFetchFullContent}
+                    startContent={
+                        fetchSuccess ? (
+                            <Check className="size-4" />
+                        ) : !isFetching ? (
+                            <FileText className="size-4" />
+                        ) : null
+                    }
+                >
+                    {isFetching ? "抓取中..." : fetchSuccess ? "已获取" : "获取全文"}
+                </Button>
             )}
 
             {/* 错误提示 */}

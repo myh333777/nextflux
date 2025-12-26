@@ -104,12 +104,12 @@ const ArticleView = () => {
       }
     };
 
-    // 重置翻译和 MCP 内容
+    // 重置翻译和 MCP 内容 - 仅在文章 ID 变化时重置
     setTranslatedContent(null);
     setMcpContent(null);
 
     loadArticleByArticleId();
-  }, [articleId, $filteredArticles]);
+  }, [articleId]); // 移除 $filteredArticles 依赖，避免收藏时重置
 
   // 获取当前显示的内容（繁简转换）- 默认开启
   const rawContent = translatedContent || mcpContent || $activeArticle?.content;
