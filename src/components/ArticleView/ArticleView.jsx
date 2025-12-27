@@ -210,16 +210,24 @@ const ArticleView = () => {
     const settings = settingsState.get();
     if (settings.autoTranslateAfterFetch && settings.translateEnabled && content) {
       try {
-        const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
-        // 如果设置为 AI 但 AI 未配置，回落到 Google
-        let translateFn = translateWithGoogleHtml;
-        if (settings.translateProvider === "ai" && settings.aiApiKey && settings.aiEndpoint) {
-          translateFn = translateWithAIHtml;
-        }
-        const result = await translateFn(content);
-        // 翻译返回 { translatedHtml, error } 对象
-        if (result && result.translatedHtml && !result.error) {
-          setTranslatedContent(result.translatedHtml);
+        // 如果是 Markdown 内容，使用 Markdown 翻译函数
+        if (isMarkdown) {
+          const { translateMarkdown } = await import("@/api/translate");
+          const result = await translateMarkdown(content);
+          if (result && result.translatedMarkdown && !result.error) {
+            setTranslatedContent(result.translatedMarkdown);
+          }
+        } else {
+          // HTML 内容使用原有翻译函数
+          const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
+          let translateFn = translateWithGoogleHtml;
+          if (settings.translateProvider === "ai" && settings.aiApiKey && settings.aiEndpoint) {
+            translateFn = translateWithAIHtml;
+          }
+          const result = await translateFn(content);
+          if (result && result.translatedHtml && !result.error) {
+            setTranslatedContent(result.translatedHtml);
+          }
         }
       } catch (err) {
         console.error("自动翻译失败:", err);
@@ -335,37 +343,54 @@ const ArticleView = () => {
           setIsTranslating(true);
 
           console.log(`[AutoTranslate] 检测到英文内容，使用 ${useAI ? 'AI' : 'Google'} 翻译`);
-          const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
 
-          const translateFn = useAI ? translateWithAIHtml : translateWithGoogleHtml;
+          let result;
+          // 如果是 MCP Markdown 内容，使用 Markdown 翻译
+          if (isMcpMarkdown && mcpContent) {
+            const { translateMarkdown } = await import("@/api/translate");
+            result = await translateMarkdown(contentToCheck);
+            if (result && result.translatedMarkdown && !result.error) {
+              // 使用 ignore flag 检查
+              if (ignore) {
+                console.log(`[AutoTranslate] 文章已切换，丢弃翻译结果`);
+                setIsTranslating(false);
+                setTranslateProvider(null);
+                return;
+              }
+              setTranslatedContent(result.translatedMarkdown);
+            }
+          } else {
+            // HTML 内容使用原有翻译函数
+            const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
+            const translateFn = useAI ? translateWithAIHtml : translateWithGoogleHtml;
+            result = await translateFn(contentToCheck);
 
-          const result = await translateFn(contentToCheck);
+            // 使用 ignore flag 检查
+            if (ignore) {
+              console.log(`[AutoTranslate] 文章已切换，丢弃翻译结果`);
+              setIsTranslating(false);
+              setTranslateProvider(null);
+              return;
+            }
 
-          // 使用 ignore flag 检查
-          if (ignore) {
-            console.log(`[AutoTranslate] 文章已切换，丢弃翻译结果`);
-            setIsTranslating(false);
-            setTranslateProvider(null);
-            return;
+            if (result && result.translatedHtml && !result.error) {
+              setTranslatedContent(result.translatedHtml);
+            }
           }
 
-          if (result && result.translatedHtml && !result.error) {
-            setTranslatedContent(result.translatedHtml);
-
-            // 同时翻译标题
-            const currentArticle = activeArticle.get();
-            const title = currentArticle?.title;
-            if (title) {
-              try {
-                const { translateText } = await import("@/api/translate");
-                const titleResult = await translateText(title, settings.targetLanguage || "zh");
-                if (!ignore && titleResult.translatedText) {
-                  setTranslatedTitle(titleResult.translatedText);
-                  console.log('[AutoTranslate] 标题翻译成功:', titleResult.translatedText);
-                }
-              } catch (titleErr) {
-                console.warn('[AutoTranslate] 标题翻译失败:', titleErr);
+          // 同时翻译标题
+          const currentArticle = activeArticle.get();
+          const title = currentArticle?.title;
+          if (title) {
+            try {
+              const { translateText } = await import("@/api/translate");
+              const titleResult = await translateText(title, settings.targetLanguage || "zh");
+              if (!ignore && titleResult.translatedText) {
+                setTranslatedTitle(titleResult.translatedText);
+                console.log('[AutoTranslate] 标题翻译成功:', titleResult.translatedText);
               }
+            } catch (titleErr) {
+              console.warn('[AutoTranslate] 标题翻译失败:', titleErr);
             }
           }
 
