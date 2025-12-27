@@ -11,6 +11,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 
 const ArticleSummary = ({ content, title, articleUrl }) => {
@@ -269,10 +270,10 @@ const ArticleSummary = ({ content, title, articleUrl }) => {
                                     </div>
                                 ) : (
                                     <div>
-                                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                                        <div className="prose prose-sm dark:prose-invert max-w-none [&_table_td_br]:block [&_table_th_br]:block">
                                             <ReactMarkdown
                                                 remarkPlugins={[remarkGfm, remarkMath]}
-                                                rehypePlugins={[rehypeKatex]}
+                                                rehypePlugins={[rehypeRaw, rehypeKatex]}
                                             >
                                                 {item.summary}
                                             </ReactMarkdown>
