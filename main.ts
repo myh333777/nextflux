@@ -130,8 +130,8 @@ Deno.serve(async (req) => {
                 "Accept": "image/*,*/*;q=0.8",
             };
 
-            // 需要 Referer 的域名列表 (如 OFweek)
-            const needRefererDomains = ['ofweek.com', 'mp.ofweek.com'];
+            // 需要 Referer 的域名列表 (如 OFweek, armscontrolwonk)
+            const needRefererDomains = ['ofweek.com', 'mp.ofweek.com', 'armscontrolwonk.com'];
             // 需要移除 Referer 的域名列表 (如 Toutiao)
             const noRefererDomains = ['toutiao.com', 'toutiaoimg.com'];
 
