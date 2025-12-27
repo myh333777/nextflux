@@ -1,4 +1,4 @@
-// Deno Deploy 静态文件服务器 (SPA + MCP 代理)
+// Deno Deploy 静态文件服务器 (SPA + MCP 代理 + Google 翻译代理)
 
 const DIST_DIR = "./dist";
 const MCP_URL = "http://usa2.190904.xyz:8766/mcp";
@@ -16,6 +16,108 @@ Deno.serve(async (req) => {
                 "Access-Control-Expose-Headers": "mcp-session-id",
             },
         });
+    }
+
+    // Google 翻译代理
+    if (url.pathname === "/api/translate") {
+        try {
+            const body = await req.json();
+            const { text, targetLang = "zh" } = body;
+
+            if (!text) {
+                return new Response(JSON.stringify({ error: "Missing text" }), {
+                    status: 400,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    },
+                });
+            }
+
+            // 使用 Google Translate API (免费版)
+            const translateUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+
+            const translateRes = await fetch(translateUrl, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                },
+            });
+
+            if (!translateRes.ok) {
+                throw new Error(`Google Translate API error: ${translateRes.status}`);
+            }
+
+            const result = await translateRes.json();
+
+            // 解析 Google 翻译响应格式
+            let translatedText = "";
+            if (result && result[0]) {
+                for (const item of result[0]) {
+                    if (item[0]) {
+                        translatedText += item[0];
+                    }
+                }
+            }
+
+            return new Response(JSON.stringify({ translatedText }), {
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            });
+        } catch (e) {
+            console.error("Translate proxy error:", e);
+            return new Response(JSON.stringify({ error: (e as Error).message }), {
+                status: 500,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            });
+        }
+    }
+
+    // 图片代理 - 解决国内无法访问外网图片问题
+    if (url.pathname === "/api/image-proxy") {
+        const imageUrl = url.searchParams.get("url");
+
+        if (!imageUrl) {
+            return new Response("Missing url parameter", {
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" }
+            });
+        }
+
+        try {
+            const imageRes = await fetch(imageUrl, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "image/*,*/*;q=0.8",
+                    "Referer": new URL(imageUrl).origin,
+                },
+            });
+
+            if (!imageRes.ok) {
+                throw new Error(`Image fetch failed: ${imageRes.status}`);
+            }
+
+            const contentType = imageRes.headers.get("Content-Type") || "image/jpeg";
+            const imageData = await imageRes.arrayBuffer();
+
+            return new Response(imageData, {
+                headers: {
+                    "Content-Type": contentType,
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=86400", // 缓存24小时
+                },
+            });
+        } catch (e) {
+            console.error("Image proxy error:", e);
+            return new Response("Image proxy error", {
+                status: 500,
+                headers: { "Access-Control-Allow-Origin": "*" },
+            });
+        }
     }
 
     // 代理 MCP 请求

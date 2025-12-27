@@ -12,7 +12,7 @@ import {
   handleMarkStatus,
   handleMarkAboveAsRead,
 } from "@/handlers/articleHandlers.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useStore } from "@nanostores/react";
 import { settingsState } from "@/stores/settingsStore";
 import { feeds } from "@/stores/feedsStore";
@@ -21,6 +21,9 @@ import FeedIcon from "@/components/ui/FeedIcon.jsx";
 import { useTranslation } from "react-i18next";
 import { ContextMenu, ContextMenuItem } from "@/components/ui/ContextMenu";
 import { traditionalToSimplified } from "@/utils/t2s.js";
+import { isEnglishText } from "@/utils/langDetect.js";
+import { getCachedTranslation, setCachedTranslation, isTranslating, addToQueue, removeFromQueue } from "@/stores/translationCache.js";
+import { translationCache } from "@/stores/translationCache.js";
 
 export default function ArticleCard({ article }) {
   const { t } = useTranslation();
@@ -28,6 +31,7 @@ export default function ArticleCard({ article }) {
   const { articleId } = useParams();
   const cardRef = useRef(null);
   const $feeds = useStore(feeds);
+  const $translationCache = useStore(translationCache);
   const {
     markAsReadOnScroll,
     cardImageSize,
@@ -36,6 +40,8 @@ export default function ArticleCard({ article }) {
     textPreviewLines,
     titleLines,
     t2sEnabled,
+    translateListItems,
+    translateEnabled,
   } = useStore(settingsState);
   const hasBeenVisible = useRef(false);
   const { ripples, onClear, onPress } = useRipple();
@@ -51,15 +57,29 @@ export default function ArticleCard({ article }) {
     return t2sEnabled !== false ? traditionalToSimplified(title) : title;
   }, [article.feedId, $feeds, t2sEnabled]);
 
-  const previewContent = useMemo(() => {
-    const text = extractTextFromHtml(article.content).slice(0, 300);
-    return t2sEnabled !== false ? traditionalToSimplified(text) : text;
-  }, [article.content, t2sEnabled]);
+  // 原始标题和摘要
+  const rawTitle = useMemo(() => cleanTitle(article.title), [article.title]);
+  const rawPreview = useMemo(() => extractTextFromHtml(article.content).slice(0, 300), [article.content]);
 
+  // 检查是否需要翻译（英文内容）
+  const needsTranslation = useMemo(() => {
+    if (!translateListItems || !translateEnabled) return false;
+    return isEnglishText(rawTitle) || isEnglishText(rawPreview);
+  }, [translateListItems, translateEnabled, rawTitle, rawPreview]);
+
+  // 获取翻译缓存
+  const cached = $translationCache[article.id];
+
+  // 显示内容（优先显示翻译）
   const displayTitle = useMemo(() => {
-    const title = cleanTitle(article.title);
+    const title = cached?.title || rawTitle;
     return t2sEnabled !== false ? traditionalToSimplified(title) : title;
-  }, [article.title, t2sEnabled]);
+  }, [cached?.title, rawTitle, t2sEnabled]);
+
+  const previewContent = useMemo(() => {
+    const text = cached?.preview || rawPreview;
+    return t2sEnabled !== false ? traditionalToSimplified(text) : text;
+  }, [cached?.preview, rawPreview, t2sEnabled]);
 
   useEffect(() => {
     // 如果文章已读或未启用滚动标记已读,则不需要观察
@@ -101,6 +121,76 @@ export default function ArticleCard({ article }) {
       }
     };
   }, [article, markAsReadOnScroll]);
+
+  // 滚动时翻译可见的卡片
+  useEffect(() => {
+    // 检查是否需要翻译
+    if (!translateListItems || !translateEnabled) return;
+
+    // 检查是否是英文
+    const isEnglish = isEnglishText(rawTitle) || isEnglishText(rawPreview);
+    if (!isEnglish) return;
+
+    // 已翻译或正在翻译
+    if (getCachedTranslation(article.id)?.title) return;
+
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            // 再次检查防止重复翻译
+            if (getCachedTranslation(article.id)?.title || isTranslating(article.id)) {
+              observer.unobserve(entry.target);
+              return;
+            }
+
+            // 添加到翻译队列
+            addToQueue(article.id);
+
+            try {
+              const { translateText } = await import("@/api/translate");
+
+              // 翻译标题
+              if (isEnglishText(rawTitle)) {
+                const titleResult = await translateText(rawTitle);
+                if (titleResult.translatedText && !titleResult.error) {
+                  setCachedTranslation(article.id, { title: titleResult.translatedText });
+                }
+              }
+
+              // 翻译摘要
+              if (isEnglishText(rawPreview)) {
+                const previewResult = await translateText(rawPreview.slice(0, 200));
+                if (previewResult.translatedText && !previewResult.error) {
+                  setCachedTranslation(article.id, { preview: previewResult.translatedText });
+                }
+              }
+            } catch (err) {
+              console.warn("翻译列表项失败:", err);
+            } finally {
+              removeFromQueue(article.id);
+            }
+
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      {
+        root: document.querySelector(".v-list"),
+        // rootMargin 提前 800px 开始翻译，确保滚动前已翻译
+        rootMargin: "800px 0px 800px 0px",
+        threshold: 0,
+      }
+    );
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [article.id, translateListItems, translateEnabled, rawTitle, rawPreview]);
 
   const handleArticleClick = async (article) => {
     const basePath = window.location.pathname.split("/article/")[0];

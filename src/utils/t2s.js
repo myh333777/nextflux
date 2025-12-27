@@ -13,7 +13,7 @@ const converter = OpenCC.Converter({ from: 'tw', to: 'cn' });
  * @returns {string} 简体文本
  */
 export function traditionalToSimplified(text) {
-    if (!text) return text;
+    if (!text || typeof text !== 'string') return text;
     try {
         return converter(text);
     } catch (e) {
@@ -28,7 +28,7 @@ export function traditionalToSimplified(text) {
  * @returns {string} 转换后的 HTML
  */
 export function convertHtmlToSimplified(html) {
-    if (!html) return html;
+    if (!html || typeof html !== 'string') return html;
 
     try {
         // OpenCC 可以直接处理带 HTML 标签的文本，会自动保留标签

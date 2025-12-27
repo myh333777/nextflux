@@ -112,14 +112,55 @@ async function callTool(endpoint, sessionId, toolName, args) {
 }
 
 /**
+ * 检查是否为占位符图片（不需要代理）
+ */
+function isPlaceholderImage(url) {
+    if (!url) return true;
+    const lowerUrl = url.toLowerCase();
+    // 常见占位符关键词
+    const placeholderKeywords = [
+        'placeholder', 'grey-placeholder', 'gray-placeholder',
+        'lazy', 'blank', 'spacer', 'pixel', '1x1',
+        'loading', 'skeleton', 'dummy'
+    ];
+    return placeholderKeywords.some(keyword => lowerUrl.includes(keyword));
+}
+
+/**
+ * 将 HTML 中的图片 URL 替换为代理 URL
+ * 解决国内无法访问外网图片的问题
+ */
+function proxyImageUrls(html) {
+    if (!html) return html;
+
+    // 匹配 <img src="..."> 中的 src 属性
+    return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*)>/gi, (match, before, src, after) => {
+        // 如果已经是代理 URL，不再处理
+        if (src.startsWith('/api/image-proxy')) {
+            return match;
+        }
+        // 如果是 data URL 或相对路径，不处理
+        if (src.startsWith('data:') || src.startsWith('/')) {
+            return match;
+        }
+        // 如果是占位符图片，直接移除该 img 标签
+        if (isPlaceholderImage(src)) {
+            return '';
+        }
+        const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(src)}`;
+        return `<img ${before}src="${proxyUrl}"${after}>`;
+    });
+}
+
+/**
  * 将纯文本/Markdown 转换为 HTML，保持排版
  */
 function formatContentAsHtml(content) {
     if (!content) return "";
 
-    // 如果已经是 HTML (包含标签)，直接返回
+    // 如果已经是 HTML (包含标签)，处理其中的图片后返回
     if (/<[^>]+>/.test(content)) {
-        return content;
+        return proxyImageUrls(content);
     }
 
     // 处理 Markdown 格式的内容
@@ -132,6 +173,16 @@ function formatContentAsHtml(content) {
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         // 处理斜体
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        // 处理图片 (必须在链接之前处理，因为语法相似)
+        // 使用图片代理解决国内访问问题
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
+            // 跳过占位符图片
+            if (isPlaceholderImage(url)) {
+                return '';
+            }
+            const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(url)}`;
+            return `<img src="${proxyUrl}" alt="${alt}" loading="lazy">`;
+        })
         // 处理链接
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
         // 处理换行 - 双换行变成段落，单换行变成 <br>
@@ -147,6 +198,57 @@ function formatContentAsHtml(content) {
         .join('\n');
 
     return html;
+}
+
+/**
+ * 使用简单 fetch 阅读模式获取文章内容
+ * 通过 CORS 代理获取页面内容
+ * @param {string} url - 文章 URL
+ * @returns {Promise<{success: boolean, content?: string, error?: string}>}
+ */
+export async function fetchWithReadability(url) {
+    try {
+        // 使用 allorigins 代理绕过 CORS
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+        const response = await fetch(proxyUrl, {
+            headers: {
+                'Accept': 'text/html,application/xhtml+xml',
+            }
+        });
+
+        if (!response.ok) {
+            return { success: false, error: `HTTP ${response.status}` };
+        }
+
+        const html = await response.text();
+
+        // 简单的内容提取：查找 article 或 main 标签
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+
+        // 移除不需要的元素
+        const removeSelectors = ['script', 'style', 'nav', 'header', 'footer', 'aside', '.sidebar', '.comments', '.ad', '.advertisement', '[class*="ad-"]'];
+        removeSelectors.forEach(sel => {
+            doc.querySelectorAll(sel).forEach(el => el.remove());
+        });
+
+        // 尝试获取文章内容
+        let content = doc.querySelector('article')?.innerHTML
+            || doc.querySelector('[role="main"]')?.innerHTML
+            || doc.querySelector('main')?.innerHTML
+            || doc.querySelector('.post-content')?.innerHTML
+            || doc.querySelector('.article-content')?.innerHTML
+            || doc.querySelector('.entry-content')?.innerHTML
+            || doc.querySelector('.content')?.innerHTML;
+
+        if (content && content.length > 500) {
+            return { success: true, content: content };
+        }
+
+        return { success: false, error: "无法提取文章内容" };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
 }
 
 /**
@@ -173,27 +275,41 @@ export async function fetchFullContent(url) {
         // 调用 get_article 工具
         const result = await callTool(settings.mcpEndpoint, mcpSessionId, "get_article", { url });
 
-        // FastMCP 返回的结果包含 content 数组
+        // 新格式：优先使用 structuredContent
+        if (result.structuredContent?.result) {
+            const structured = result.structuredContent.result;
+            if (structured.success && structured.content) {
+                return {
+                    success: true,
+                    content: formatContentAsHtml(structured.content),
+                    title: structured.title || "",
+                    method: structured.method || ""
+                };
+            }
+        }
+
+        // 旧格式：FastMCP 返回的结果包含 content 数组
         if (result.content && Array.isArray(result.content)) {
             const textContent = result.content.find(c => c.type === "text");
             if (textContent) {
-                // 尝试解析 JSON
+                // 尝试解析 JSON（双层嵌套）
                 try {
                     const parsed = JSON.parse(textContent.text);
                     const rawContent = parsed.content || parsed.html || textContent.text;
                     return {
+                        success: true,
                         content: formatContentAsHtml(rawContent),
                         title: parsed.title || "",
                         method: parsed.method || ""
                     };
                 } catch (e) {
                     // 不是 JSON，直接格式化文本
-                    return { content: formatContentAsHtml(textContent.text) };
+                    return { success: true, content: formatContentAsHtml(textContent.text) };
                 }
             }
         }
 
-        return { content: "", error: "No content returned" };
+        return { success: false, content: "", error: "No content returned" };
     } catch (error) {
         // 如果是 session 错误，重置并重试一次
         if (error.message?.includes("session") || error.message?.includes("Session")) {
@@ -202,6 +318,21 @@ export async function fetchFullContent(url) {
                 const initResult = await initSession(settings.mcpEndpoint);
                 if (initResult.success) {
                     const result = await callTool(settings.mcpEndpoint, mcpSessionId, "get_article", { url });
+
+                    // 新格式：优先使用 structuredContent
+                    if (result.structuredContent?.result) {
+                        const structured = result.structuredContent.result;
+                        if (structured.success && structured.content) {
+                            return {
+                                success: true,
+                                content: formatContentAsHtml(structured.content),
+                                title: structured.title || "",
+                                method: structured.method || ""
+                            };
+                        }
+                    }
+
+                    // 旧格式
                     if (result.content && Array.isArray(result.content)) {
                         const textContent = result.content.find(c => c.type === "text");
                         if (textContent) {
@@ -209,22 +340,23 @@ export async function fetchFullContent(url) {
                                 const parsed = JSON.parse(textContent.text);
                                 const rawContent = parsed.content || parsed.html || textContent.text;
                                 return {
+                                    success: true,
                                     content: formatContentAsHtml(rawContent),
                                     title: parsed.title || "",
                                     method: parsed.method || ""
                                 };
                             } catch (e) {
-                                return { content: formatContentAsHtml(textContent.text) };
+                                return { success: true, content: formatContentAsHtml(textContent.text) };
                             }
                         }
                     }
                 }
             } catch (retryError) {
-                return { content: "", error: retryError.message };
+                return { success: false, content: "", error: retryError.message };
             }
         }
 
-        return { content: "", error: error.message };
+        return { success: false, content: "", error: error.message };
     }
 }
 

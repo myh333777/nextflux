@@ -1,11 +1,10 @@
 import { useState, useCallback } from "react";
 import { useStore } from "@nanostores/react";
-import { Button, ButtonGroup, Tooltip, Spinner, Chip } from "@heroui/react";
-import { Languages, FileText, X, Check } from "lucide-react";
+import { Button, ButtonGroup, Tooltip, Chip } from "@heroui/react";
+import { Languages, FileText, X, Check, Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 import { settingsState } from "@/stores/settingsStore";
-import { translateHtml } from "@/api/translate";
+import { translateWithGoogleHtml, translateWithAIHtml } from "@/api/translate";
 import { fetchFullContent } from "@/api/mcp";
 
 const ArticleToolbar = ({
@@ -18,35 +17,62 @@ const ArticleToolbar = ({
     const settings = useStore(settingsState);
 
     // 翻译状态
-    const [isTranslating, setIsTranslating] = useState(false);
+    const [isGoogleTranslating, setIsGoogleTranslating] = useState(false);
+    const [isAITranslating, setIsAITranslating] = useState(false);
     const [isTranslated, setIsTranslated] = useState(false);
     const [translateError, setTranslateError] = useState(null);
+    const [translatedWith, setTranslatedWith] = useState(null); // 'google' | 'ai'
 
     // 全文抓取状态
     const [isFetching, setIsFetching] = useState(false);
     const [fetchSuccess, setFetchSuccess] = useState(false);
     const [fetchError, setFetchError] = useState(null);
 
-    // 翻译文章
-    const handleTranslate = useCallback(async () => {
+    // Google 翻译
+    const handleGoogleTranslate = useCallback(async () => {
         if (!articleContent) return;
 
-        setIsTranslating(true);
+        setIsGoogleTranslating(true);
         setTranslateError(null);
 
         try {
-            const result = await translateHtml(articleContent);
+            const result = await translateWithGoogleHtml(articleContent);
 
             if (result.error) {
                 setTranslateError(result.error);
             } else {
                 onTranslatedContentUpdate?.(result.translatedHtml);
                 setIsTranslated(true);
+                setTranslatedWith("google");
             }
         } catch (err) {
             setTranslateError(err.message);
         } finally {
-            setIsTranslating(false);
+            setIsGoogleTranslating(false);
+        }
+    }, [articleContent, onTranslatedContentUpdate]);
+
+    // AI 翻译
+    const handleAITranslate = useCallback(async () => {
+        if (!articleContent) return;
+
+        setIsAITranslating(true);
+        setTranslateError(null);
+
+        try {
+            const result = await translateWithAIHtml(articleContent);
+
+            if (result.error) {
+                setTranslateError(result.error);
+            } else {
+                onTranslatedContentUpdate?.(result.translatedHtml);
+                setIsTranslated(true);
+                setTranslatedWith("ai");
+            }
+        } catch (err) {
+            setTranslateError(err.message);
+        } finally {
+            setIsAITranslating(false);
         }
     }, [articleContent, onTranslatedContentUpdate]);
 
@@ -54,6 +80,7 @@ const ArticleToolbar = ({
     const handleShowOriginal = useCallback(() => {
         onTranslatedContentUpdate?.(null);
         setIsTranslated(false);
+        setTranslatedWith(null);
     }, [onTranslatedContentUpdate]);
 
     // 获取全文
@@ -69,9 +96,13 @@ const ArticleToolbar = ({
             if (result.error) {
                 setFetchError(result.error);
             } else if (result.content) {
+                // 清除翻译状态，允许对新内容重新翻译
+                onTranslatedContentUpdate?.(null);
+                setIsTranslated(false);
+                setTranslatedWith(null);
+
                 onContentUpdate?.(result.content);
                 setFetchSuccess(true);
-                // 5秒后重置成功状态
                 setTimeout(() => setFetchSuccess(false), 5000);
             }
         } catch (err) {
@@ -79,47 +110,68 @@ const ArticleToolbar = ({
         } finally {
             setIsFetching(false);
         }
-    }, [articleUrl, onContentUpdate]);
+    }, [articleUrl, onContentUpdate, onTranslatedContentUpdate]);
 
-    const showTranslate = settings.translateEnabled && settings.aiApiKey;
+    const showTranslate = settings.translateEnabled;
+    const showAITranslate = settings.aiApiKey; // AI 翻译需要配置 API Key
     const showMCP = settings.mcpEnabled && settings.mcpEndpoint;
 
     if (!showTranslate && !showMCP) {
         return null;
     }
 
+    const isTranslating = isGoogleTranslating || isAITranslating;
+
     return (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
-            {/* 翻译按钮 */}
-            {showTranslate && (
+            {/* Google 翻译按钮 */}
+            {showTranslate && !isTranslated && (
+                <Button
+                    size="sm"
+                    variant="flat"
+                    color="secondary"
+                    isLoading={isGoogleTranslating}
+                    isDisabled={isAITranslating}
+                    onPress={handleGoogleTranslate}
+                    startContent={!isGoogleTranslating && <Languages className="size-4" />}
+                >
+                    {isGoogleTranslating ? "翻译中..." : "Google"}
+                </Button>
+            )}
+
+            {/* AI 翻译按钮 */}
+            {showTranslate && showAITranslate && !isTranslated && (
+                <Button
+                    size="sm"
+                    variant="flat"
+                    color="primary"
+                    isLoading={isAITranslating}
+                    isDisabled={isGoogleTranslating}
+                    onPress={handleAITranslate}
+                    startContent={!isAITranslating && <Bot className="size-4" />}
+                >
+                    {isAITranslating ? "翻译中..." : "AI"}
+                </Button>
+            )}
+
+            {/* 已翻译状态 */}
+            {isTranslated && (
                 <ButtonGroup size="sm" variant="flat">
-                    {!isTranslated ? (
-                        <Tooltip content="翻译文章内容">
-                            <Button
-                                color="secondary"
-                                isLoading={isTranslating}
-                                onPress={handleTranslate}
-                                startContent={!isTranslating && <Languages className="size-4" />}
-                            >
-                                {isTranslating ? "翻译中..." : "翻译"}
-                            </Button>
-                        </Tooltip>
-                    ) : (
-                        <>
-                            <Chip color="success" variant="flat" size="sm" startContent={<Check className="size-3" />}>
-                                已翻译
-                            </Chip>
-                            <Tooltip content="显示原文">
-                                <Button
-                                    color="default"
-                                    isIconOnly
-                                    onPress={handleShowOriginal}
-                                >
-                                    <X className="size-4" />
-                                </Button>
-                            </Tooltip>
-                        </>
-                    )}
+                    <Chip
+                        color="success"
+                        variant="flat"
+                        size="sm"
+                        startContent={<Check className="size-3" />}
+                    >
+                        {translatedWith === "ai" ? "AI已翻译" : "Google已翻译"}
+                    </Chip>
+                    <Button
+                        color="default"
+                        isIconOnly
+                        onPress={handleShowOriginal}
+                    >
+                        <X className="size-4" />
+                    </Button>
                 </ButtonGroup>
             )}
 
