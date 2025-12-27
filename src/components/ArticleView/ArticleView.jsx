@@ -589,10 +589,14 @@ const ArticleView = () => {
                         }}
                       >
                         {/* 根据内容类型选择渲染方式 */}
-                        {isMcpMarkdown && mcpContent && !translatedContent ? (
-                          // MCP Markdown 内容使用 ReactMarkdown 渲染
+                        {isMcpMarkdown && mcpContent ? (
+                          // MCP Markdown 内容使用 ReactMarkdown 渲染（包括翻译后的内容）
                           <MarkdownContent
-                            content={shouldConvertT2S ? traditionalToSimplified(mcpContent) : mcpContent}
+                            content={
+                              translatedContent
+                                ? (shouldConvertT2S ? traditionalToSimplified(translatedContent) : translatedContent)
+                                : (shouldConvertT2S ? traditionalToSimplified(mcpContent) : mcpContent)
+                            }
                           />
                         ) : (
                           // HTML 内容使用 html-react-parser 渲染
