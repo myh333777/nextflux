@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 import CodeBlock from "./CodeBlock.jsx";
 import ArticleImage from "./ArticleImage.jsx";
@@ -118,7 +119,7 @@ const MarkdownContent = ({ content, baseUrl, className = "" }) => {
         <ReactMarkdown
             className={className}
             remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[rehypeRaw, rehypeKatex]}
             components={components}
         >
             {content}
