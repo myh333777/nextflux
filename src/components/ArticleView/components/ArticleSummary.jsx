@@ -25,8 +25,15 @@ const ArticleSummary = ({ content, title, articleUrl }) => {
     const [memosSaving, setMemosSaving] = useState(false);
     const [memosSaved, setMemosSaved] = useState(false);
 
-    // 选中的提示词 ID
-    const [selectedPromptIds, setSelectedPromptIds] = useState(["default"]);
+    // 选中的提示词 ID (从 localStorage 恢复)
+    const [selectedPromptIds, setSelectedPromptIds] = useState(() => {
+        try {
+            const saved = localStorage.getItem('ai-summary-selected-prompts');
+            return saved ? JSON.parse(saved) : ["default"];
+        } catch {
+            return ["default"];
+        }
+    });
 
     // 合并预设和自定义提示词
     const allPrompts = useMemo(() => {
@@ -48,11 +55,16 @@ const ArticleSummary = ({ content, title, articleUrl }) => {
 
     const handleTogglePrompt = (promptId) => {
         setSelectedPromptIds(prev => {
-            if (prev.includes(promptId)) {
-                return prev.filter(id => id !== promptId);
-            } else {
-                return [...prev, promptId];
+            const newIds = prev.includes(promptId)
+                ? prev.filter(id => id !== promptId)
+                : [...prev, promptId];
+            // 持久化到 localStorage
+            try {
+                localStorage.setItem('ai-summary-selected-prompts', JSON.stringify(newIds));
+            } catch (e) {
+                console.warn('Failed to save prompt selection:', e);
             }
+            return newIds;
         });
     };
 

@@ -113,6 +113,9 @@ Deno.serve(async (req) => {
                 }
             }
 
+            // 修复常见的模板变量 (如 DW的 ${formatId})
+            targetUrl = targetUrl.replace(/\$\{formatId\}/g, '303'); // DW默认格式
+
             try {
                 targetUrl = new URL(targetUrl).toString();
             } catch {
