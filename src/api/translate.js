@@ -479,3 +479,134 @@ async function translateHtmlWithProvider(html, lang, mode, provider) {
         return { translatedHtml: html, error: error.message };
     }
 }
+
+/**
+ * 翻译 Markdown 内容，保持格式
+ * 将 Markdown 按段落分割，单独翻译，保留格式
+ */
+export async function translateMarkdown(markdown, targetLang = null) {
+    const settings = settingsState.get();
+    const lang = targetLang || settings.targetLanguage || "zh";
+
+    if (!markdown) {
+        return { translatedText: markdown, error: null };
+    }
+
+    try {
+        // 1. 按双换行分割段落 (Markdown 段落)
+        const paragraphs = markdown.split(/\n\n+/);
+
+        // 过滤空段落，并保留原始索引以便还原
+        const blocksToTranslate = paragraphs
+            .map((text, index) => ({ text: text.trim(), index }))
+            .filter(item => item.text.length > 0);
+
+        if (blocksToTranslate.length === 0) {
+            return { translatedText: markdown, error: null };
+        }
+
+        // 2. 并发翻译
+        const BATCH_SIZE = settings.translateConcurrency || 20;
+        const translatedBlocks = new Array(paragraphs.length).fill('');
+
+        // 填充原本就是空的段落（如果有的话，虽然上面 split 不太会产生，但为了保持结构）
+        paragraphs.forEach((p, i) => {
+            if (!p.trim()) translatedBlocks[i] = p;
+        });
+
+        // 挑选翻译函数
+        const priority = settings.autoTranslatePriority || "google";
+        const canUseAI = settings.aiApiKey && settings.aiEndpoint;
+        const translateFn = (priority === "ai" && canUseAI) ? translateWithAI : translateWithGoogle;
+
+        for (let i = 0; i < blocksToTranslate.length; i += BATCH_SIZE) {
+            const batch = blocksToTranslate.slice(i, i + BATCH_SIZE);
+            const promises = batch.map(async (item) => {
+                try {
+                    // 对于代码块，不翻译 content
+                    if (item.text.startsWith('```')) {
+                        translatedBlocks[item.index] = item.text;
+                        return;
+                    }
+
+                    // 优化：跳过纯图片、纯链接行
+                    // ![alt](url) 或 [text](url)
+                    // ^!\[.*\]\(.*\)$ matches exact image line
+                    if (/^!\[.*?\]\(.*?\)$/.test(item.text) || /^\[.*?\]\(.*?\)$/.test(item.text)) {
+                        translatedBlocks[item.index] = item.text;
+                        return;
+                    }
+
+                    // 优化：跳过LaTeX公式块 (行内: $...$ 或 块级: $$...$$)
+                    if (/^\$\$[\s\S]+?\$\$$/.test(item.text) || /^\$[^$]+?\$$/.test(item.text)) {
+                        translatedBlocks[item.index] = item.text;
+                        return;
+                    }
+
+                    // 优化：跳过极短无关内容
+                    if (!/[a-zA-Z\u4e00-\u9fff]/.test(item.text)) {
+                        translatedBlocks[item.index] = item.text;
+                        return;
+                    }
+
+                    // 保护Markdown语法:提取URL,翻译alt/text,避免括号被翻译成中文
+                    const protectedItems = [];
+                    let textToTranslate = item.text;
+
+                    // 提取图片 ![alt](url) - 保护URL,保留alt供翻译
+                    textToTranslate = textToTranslate.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
+                        const idx = protectedItems.length;
+                        protectedItems.push({ type: 'img', alt, url });
+                        // 返回占位符 + alt文本 (供翻译)
+                        return `___IMG${idx}START___ ${alt} ___IMG${idx}END___`;
+                    });
+
+                    // 提取链接 [text](url) - 保护URL,保留text供翻译
+                    textToTranslate = textToTranslate.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+                        const idx = protectedItems.length;
+                        protectedItems.push({ type: 'link', text, url });
+                        // 返回占位符 + text文本 (供翻译)
+                        return `___LINK${idx}START___ ${text} ___LINK${idx}END___`;
+                    });
+
+                    const result = await translateFn(textToTranslate, lang);
+                    if (!result.error && result.translatedText) {
+                        // 还原Markdown语法: 从翻译后的文本提取alt/text并重新组合
+                        let finalText = result.translatedText;
+
+                        protectedItems.forEach((item, idx) => {
+                            if (item.type === 'img') {
+                                // 匹配: ___IMG0START___ 翻译后的alt ___IMG0END___
+                                const pattern = new RegExp(`___IMG${idx}START___\\s*([\\s\\S]*?)\\s*___IMG${idx}END___`, 'g');
+                                finalText = finalText.replace(pattern, (match, translatedAlt) => {
+                                    return `![${translatedAlt.trim()}](${item.url})`;
+                                });
+                            } else if (item.type === 'link') {
+                                // 匹配: ___LINK0START___ 翻译后的text ___LINK0END___
+                                const pattern = new RegExp(`___LINK${idx}START___\\s*([\\s\\S]*?)\\s*___LINK${idx}END___`, 'g');
+                                finalText = finalText.replace(pattern, (match, translatedText) => {
+                                    return `[${translatedText.trim()}](${item.url})`;
+                                });
+                            }
+                        });
+
+                        translatedBlocks[item.index] = finalText;
+                    } else {
+                        translatedBlocks[item.index] = item.text; // 失败回退
+                    }
+                } catch (e) {
+                    console.warn(`Translation failed for markdown block ${item.index}:`, e);
+                    translatedBlocks[item.index] = item.text;
+                }
+            });
+            await Promise.all(promises);
+        }
+
+        // 3. 重新组合
+        return { translatedText: translatedBlocks.join('\n\n'), error: null };
+
+    } catch (error) {
+        console.error("Translate markdown error:", error);
+        return { translatedText: markdown, error: error.message };
+    }
+}

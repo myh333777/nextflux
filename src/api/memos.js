@@ -86,31 +86,44 @@ export async function testMemosConnection() {
     try {
         const endpoint = settings.memosEndpoint.replace(/\/+$/, "");
 
-        // 尝试新版 API (/api/v1/auth/status)
-        let response = await fetch(`${endpoint}/api/v1/auth/status`, {
-            method: "POST",
+        // 使用 /api/v1/memos 接口测试连接 (获取最新一条 memo)
+        // 这是一个更通用的接口，通常都可用
+        const response = await fetch(`${endpoint}/api/v1/memos?limit=1`, {
+            method: "GET",
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${settings.memosToken}`
             }
         });
 
-        // 如果 404，尝试旧版 API
-        if (response.status === 404) {
-            response = await fetch(`${endpoint}/api/v1/user/me`, {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${settings.memosToken}`
-                }
-            });
-        }
-
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
 
         const data = await response.json();
-        return { success: true, user: data.name || data.nickname || data.username || "已连接" };
+        // 如果能获取到数据，说明连接成功
+        // 尝试从返回的数据中获取用户信息 (如果存在 memos)
+        let username = "已连接";
+        if (data.memos && data.memos.length > 0) {
+            // creator 格式通常为 "users/1"
+            const creator = data.memos[0].creator;
+            if (creator) {
+                // 尝试获取该用户信息
+                try {
+                    const userRes = await fetch(`${endpoint}/api/v1/${creator}`, {
+                        headers: { "Authorization": `Bearer ${settings.memosToken}` }
+                    });
+                    if (userRes.ok) {
+                        const userData = await userRes.json();
+                        username = userData.nickname || userData.username || username;
+                    }
+                } catch (e) {
+                    console.warn("Failed to fetch user info", e);
+                }
+            }
+        }
+
+        return { success: true, user: username };
     } catch (error) {
         return { success: false, error: error.message };
     }

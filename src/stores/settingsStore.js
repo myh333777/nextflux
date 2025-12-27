@@ -31,7 +31,7 @@ const defaultValue = {
   floatingSidebar: false,
   // AI 总结设置
   aiEnabled: false,
-  aiEndpoint: "https://v.198990.xyz/gemini/v1beta/openai/chat/completions",
+  aiEndpoint: "https://apingr.netlify.app/gemini/v1beta/openai/chat/completions",
   aiApiKey: "",
   aiModel: "gpt-4o-mini",
   aiTranslateModel: "", // 翻译专用模型，为空时使用 aiModel

@@ -2,7 +2,7 @@ import { persistentAtom } from "@nanostores/persistent";
 import { stopAutoSync } from "./syncStore";
 
 const defaultValue = {
-  serverUrl: "",
+  serverUrl: "https://mini.190904.xyz",
   username: "",
   password: "",
   userId: "",

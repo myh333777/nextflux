@@ -15,7 +15,23 @@ const converter = OpenCC.Converter({ from: 'tw', to: 'cn' });
 export function traditionalToSimplified(text) {
     if (!text || typeof text !== 'string') return text;
     try {
-        return converter(text);
+        // 1. 提取所有 URL 并替换为占位符
+        const urls = [];
+        const placeholder = (index) => `__URL_${index}__`;
+
+        // 匹配 HTTP/HTTPS URL，避免匹配到 Markdown 结尾的括号
+        const textWithPlaceholders = text.replace(/(https?:\/\/[^\s\)]+)/g, (match) => {
+            urls.push(match);
+            return placeholder(urls.length - 1);
+        });
+
+        // 2. 执行繁简转换
+        const converted = converter(textWithPlaceholders);
+
+        // 3. 还原 URL
+        return converted.replace(/__URL_(\d+)__/g, (_, index) => {
+            return urls[parseInt(index)] || `__URL_${index}__`;
+        });
     } catch (e) {
         console.error('OpenCC conversion error:', e);
         return text;

@@ -89,16 +89,72 @@ Deno.serve(async (req) => {
         }
 
         try {
-            const imageRes = await fetch(imageUrl, {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "image/*,*/*;q=0.8",
-                    "Referer": new URL(imageUrl).origin,
-                },
+            // 尝试标准化 URL (处理中文等字符)
+            let targetUrl = imageUrl;
+            // 特殊处理 Miniflux 的 localhost 代理链接
+            // 格式: http://localhost/proxy/<hash>/<base64_url>
+            if (targetUrl.includes("/proxy/") && (targetUrl.includes("localhost") || targetUrl.includes("127.0.0.1"))) {
+                try {
+                    const parts = targetUrl.split("/proxy/");
+                    if (parts.length > 1) {
+                        const pathParts = parts[1].split("/");
+                        // 通常是 <hash>/<base64>，取最后一个部分
+                        const base64Part = pathParts[pathParts.length - 1];
+                        // 尝试 base64 解码 (需处理 URL safe base64)
+                        const decodedUrl = atob(base64Part.replace(/-/g, '+').replace(/_/g, '/'));
+                        if (decodedUrl.startsWith("http")) {
+                            console.log(`Unwrapped Miniflux proxy URL: ${targetUrl} -> ${decodedUrl}`);
+                            targetUrl = decodedUrl;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Failed to unwrap localhost proxy URL:", e);
+                    // 失败则继续尝试原链接（虽然基本会失败）
+                }
+            }
+
+            try {
+                targetUrl = new URL(targetUrl).toString();
+            } catch {
+                // 如果 new URL 失败，可能是相对路径或格式错误，尝试 encodeURI
+                targetUrl = encodeURI(targetUrl);
+            }
+
+            // 智能设置 Referer 策略
+            const targetHostname = new URL(targetUrl).hostname;
+            const headers: Record<string, string> = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "image/*,*/*;q=0.8",
+            };
+
+            // 需要 Referer 的域名列表 (如 OFweek)
+            const needRefererDomains = ['ofweek.com', 'mp.ofweek.com'];
+            // 需要移除 Referer 的域名列表 (如 Toutiao)
+            const noRefererDomains = ['toutiao.com', 'toutiaoimg.com'];
+
+            let referrerPolicy: ReferrerPolicy = "strict-origin-when-cross-origin"; // 默认
+
+            if (noRefererDomains.some(domain => targetHostname.includes(domain))) {
+                // Toutiao 等: 不发送 Referer
+                referrerPolicy = "no-referrer";
+            } else if (needRefererDomains.some(domain => targetHostname.includes(domain))) {
+                // OFweek 等: 发送 origin 作为 Referer
+                headers["Referer"] = new URL(targetUrl).origin;
+            }
+
+            const imageRes = await fetch(targetUrl, {
+                headers,
+                referrerPolicy
             });
 
             if (!imageRes.ok) {
-                throw new Error(`Image fetch failed: ${imageRes.status}`);
+                // 转发上游状态码，而不是抛出 500
+                // 有些 404/403 可能也返回图片（如占位图），但通常我们只关心成功
+                // 这里选择返回上游状态码和文本
+                return new Response(`Upstream error: ${imageRes.status}`, {
+                    status: imageRes.status,
+                    headers: { "Access-Control-Allow-Origin": "*" }
+                });
             }
 
             const contentType = imageRes.headers.get("Content-Type") || "image/jpeg";
@@ -113,7 +169,7 @@ Deno.serve(async (req) => {
             });
         } catch (e) {
             console.error("Image proxy error:", e);
-            return new Response("Image proxy error", {
+            return new Response("Image proxy error: " + (e as Error).message, {
                 status: 500,
                 headers: { "Access-Control-Allow-Origin": "*" },
             });

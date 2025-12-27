@@ -10,8 +10,18 @@
 export function isEnglishText(text) {
     if (!text || typeof text !== 'string') return false;
 
-    // 移除 HTML 标签
-    const plainText = text.replace(/<[^>]*>/g, '').trim();
+    // 1. 移除 Markdown 图片和链接: ![alt](url), [text](url)
+    // 2. 移除 HTML 标签
+    // 3. 移除 http/https 链接
+    const plainText = text
+        .replace(/!\[.*?\]\(.*?\)/g, '')   // 移除 Markdown 图片
+        .replace(/\[.*?\]\(.*?\)/g, '')    // 移除 Markdown 链接(整个移除，避免统计 url 中的英文)
+        .replace(/<[^>]*>/g, '')           // 移除 HTML 标签
+        .replace(/https?:\/\/[^\s]+/g, '') // 移除纯文本 URL
+        .replace(/```[\s\S]*?```/g, '')    // 移除代码块
+        .replace(/`[^`]*`/g, '')           // 移除行内代码
+        .trim();
+
     if (plainText.length < 10) return false;
 
     // 计算字符类型

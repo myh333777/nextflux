@@ -4,12 +4,13 @@ import { Button, ButtonGroup, Tooltip, Chip } from "@heroui/react";
 import { Languages, FileText, X, Check, Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { settingsState } from "@/stores/settingsStore";
-import { translateWithGoogleHtml, translateWithAIHtml } from "@/api/translate";
+import { translateWithGoogleHtml, translateWithAIHtml, translateMarkdown } from "@/api/translate";
 import { fetchFullContent } from "@/api/mcp";
 
 const ArticleToolbar = ({
     articleUrl,
     articleContent,
+    isMcpMarkdown = false, // 新增:标识内容是否为Markdown格式
     onContentUpdate,
     onTranslatedContentUpdate
 }) => {
@@ -28,7 +29,7 @@ const ArticleToolbar = ({
     const [fetchSuccess, setFetchSuccess] = useState(false);
     const [fetchError, setFetchError] = useState(null);
 
-    // Google 翻译
+    // Google 翻译 (智能判断Markdown/HTML)
     const handleGoogleTranslate = useCallback(async () => {
         if (!articleContent) return;
 
@@ -36,23 +37,37 @@ const ArticleToolbar = ({
         setTranslateError(null);
 
         try {
-            const result = await translateWithGoogleHtml(articleContent);
-
-            if (result.error) {
-                setTranslateError(result.error);
+            let result;
+            if (isMcpMarkdown) {
+                // Markdown格式:使用translateMarkdown
+                result = await translateMarkdown(articleContent, settings.targetLanguage || "zh");
+                // translateMarkdown返回{translatedText, error}
+                if (result.error) {
+                    setTranslateError(result.error);
+                } else {
+                    onTranslatedContentUpdate?.(result.translatedText);
+                    setIsTranslated(true);
+                    setTranslatedWith("google");
+                }
             } else {
-                onTranslatedContentUpdate?.(result.translatedHtml);
-                setIsTranslated(true);
-                setTranslatedWith("google");
+                // HTML格式:使用translateWithGoogleHtml
+                result = await translateWithGoogleHtml(articleContent);
+                if (result.error) {
+                    setTranslateError(result.error);
+                } else {
+                    onTranslatedContentUpdate?.(result.translatedHtml);
+                    setIsTranslated(true);
+                    setTranslatedWith("google");
+                }
             }
         } catch (err) {
             setTranslateError(err.message);
         } finally {
             setIsGoogleTranslating(false);
         }
-    }, [articleContent, onTranslatedContentUpdate]);
+    }, [articleContent, isMcpMarkdown, settings.targetLanguage, onTranslatedContentUpdate]);
 
-    // AI 翻译
+    // AI 翻译 (智能判断Markdown/HTML)
     const handleAITranslate = useCallback(async () => {
         if (!articleContent) return;
 
@@ -60,21 +75,36 @@ const ArticleToolbar = ({
         setTranslateError(null);
 
         try {
-            const result = await translateWithAIHtml(articleContent);
-
-            if (result.error) {
-                setTranslateError(result.error);
+            let result;
+            if (isMcpMarkdown) {
+                // Markdown格式:使用translateMarkdown(但配置为AI)
+                // 注意:translateMarkdown内部会根据settings.autoTranslatePriority选择AI/Google
+                // 这里我们需要确保使用AI,暂时直接用translateMarkdown并假设用户已配置AI优先
+                result = await translateMarkdown(articleContent, settings.targetLanguage || "zh");
+                if (result.error) {
+                    setTranslateError(result.error);
+                } else {
+                    onTranslatedContentUpdate?.(result.translatedText);
+                    setIsTranslated(true);
+                    setTranslatedWith("ai");
+                }
             } else {
-                onTranslatedContentUpdate?.(result.translatedHtml);
-                setIsTranslated(true);
-                setTranslatedWith("ai");
+                // HTML格式:使用translateWithAIHtml
+                result = await translateWithAIHtml(articleContent);
+                if (result.error) {
+                    setTranslateError(result.error);
+                } else {
+                    onTranslatedContentUpdate?.(result.translatedHtml);
+                    setIsTranslated(true);
+                    setTranslatedWith("ai");
+                }
             }
         } catch (err) {
             setTranslateError(err.message);
         } finally {
             setIsAITranslating(false);
         }
-    }, [articleContent, onTranslatedContentUpdate]);
+    }, [articleContent, isMcpMarkdown, settings.targetLanguage, onTranslatedContentUpdate]);
 
     // 取消翻译，显示原文
     const handleShowOriginal = useCallback(() => {

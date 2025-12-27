@@ -48,7 +48,8 @@ const isPlaceholderImage = (url) => {
 // 将所有图片 URL 替换为代理 URL
 const proxyAllImages = (html) => {
   if (!html) return html;
-  return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*)>/gi, (match, before, src, after) => {
+  // 改进正则：允许 src = "..." 这种带空格的写法，也兼容无引号（虽然少见）
+  return html.replace(/<img\s+([^>]*?)src\s*=\s*["']?([^"'\s>]+)["']?([^>]*)>/gi, (match, before, src, after) => {
     // 如果已经是代理 URL，不再处理
     if (src.startsWith('/api/image-proxy')) {
       return match;
@@ -210,16 +211,28 @@ const ArticleView = () => {
     const settings = settingsState.get();
     if (settings.autoTranslateAfterFetch && settings.translateEnabled && content) {
       try {
-        const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
-        // 如果设置为 AI 但 AI 未配置，回落到 Google
-        let translateFn = translateWithGoogleHtml;
-        if (settings.translateProvider === "ai" && settings.aiApiKey && settings.aiEndpoint) {
-          translateFn = translateWithAIHtml;
-        }
-        const result = await translateFn(content);
-        // 翻译返回 { translatedHtml, error } 对象
-        if (result && result.translatedHtml && !result.error) {
-          setTranslatedContent(result.translatedHtml);
+        const { translateWithGoogleHtml, translateWithAIHtml, translateMarkdown } = await import("@/api/translate");
+        // 如果是 Markdown 内容，使用 translateMarkdown
+        if (isMarkdown) {
+          const result = await translateMarkdown(content);
+          if (result && result.translatedText && !result.error) {
+            // 对于 Markdown，translatedContent 也是 Markdown 文本
+            setTranslatedContent(result.translatedText);
+          }
+        } else {
+          // 否则使用 HTML 翻译
+          let translateFn = translateWithGoogleHtml;
+          if (settings.translateProvider === "ai" && settings.aiApiKey && settings.aiEndpoint) {
+            translateFn = translateWithAIHtml;
+          }
+          const result = await translateFn(content);
+          // 翻译返回 { translatedHtml, error } 对象
+          // Markdown 返回 translatedText，HTML 返回 translatedHtml
+          const translated = result.translatedText || result.translatedHtml;
+
+          if (result && translated && !result.error) {
+            setTranslatedContent(translated);
+          }
         }
       } catch (err) {
         console.error("自动翻译失败:", err);
@@ -335,9 +348,15 @@ const ArticleView = () => {
           setIsTranslating(true);
 
           console.log(`[AutoTranslate] 检测到英文内容，使用 ${useAI ? 'AI' : 'Google'} 翻译`);
-          const { translateWithGoogleHtml, translateWithAIHtml } = await import("@/api/translate");
+          const { translateWithGoogleHtml, translateWithAIHtml, translateMarkdown } = await import("@/api/translate");
 
-          const translateFn = useAI ? translateWithAIHtml : translateWithGoogleHtml;
+          let translateFn;
+          // 如果是 Markdown，强制使用 translateMarkdown
+          if (isMcpMarkdown) {
+            translateFn = (text) => translateMarkdown(text, settings.targetLanguage || "zh");
+          } else {
+            translateFn = useAI ? translateWithAIHtml : translateWithGoogleHtml;
+          }
 
           const result = await translateFn(contentToCheck);
 
@@ -349,8 +368,11 @@ const ArticleView = () => {
             return;
           }
 
-          if (result && result.translatedHtml && !result.error) {
-            setTranslatedContent(result.translatedHtml);
+          // Markdown 返回 translatedText，HTML 返回 translatedHtml
+          const translated = result.translatedText || result.translatedHtml;
+
+          if (result && translated && !result.error) {
+            setTranslatedContent(translated);
 
             // 同时翻译标题
             const currentArticle = activeArticle.get();
@@ -550,6 +572,7 @@ const ArticleView = () => {
                     <ArticleToolbar
                       articleUrl={$activeArticle?.url}
                       articleContent={mcpContent || $activeArticle?.content}
+                      isMcpMarkdown={isMcpMarkdown}
                       onContentUpdate={handleMcpContentUpdate}
                       onTranslatedContentUpdate={setTranslatedContent}
                     />
@@ -589,10 +612,11 @@ const ArticleView = () => {
                         }}
                       >
                         {/* 根据内容类型选择渲染方式 */}
-                        {isMcpMarkdown && mcpContent && !translatedContent ? (
+                        {isMcpMarkdown && (mcpContent || translatedContent) ? (
                           // MCP Markdown 内容使用 ReactMarkdown 渲染
                           <MarkdownContent
-                            content={shouldConvertT2S ? traditionalToSimplified(mcpContent) : mcpContent}
+                            content={shouldConvertT2S ? traditionalToSimplified(translatedContent || mcpContent) : (translatedContent || mcpContent)}
+                            baseUrl={$activeArticle?.url}
                           />
                         ) : (
                           // HTML 内容使用 html-react-parser 渲染
@@ -602,6 +626,12 @@ const ArticleView = () => {
                                 domNode.type === "tag" &&
                                 domNode.name === "img"
                               ) {
+                                // Fallback: 再次检查并在解析阶段处理漏网的 localhost 图片
+                                let src = domNode.attribs.src;
+                                if (src && (src.includes('localhost') || src.includes('127.0.0.1')) && !src.startsWith('/api/image-proxy')) {
+                                  domNode.attribs.src = `/api/image-proxy?url=${encodeURIComponent(src)}`;
+                                }
+
                                 return <ArticleImage imgNode={domNode} />;
                               }
                               if (domNode.type === "tag" && domNode.name === "a") {

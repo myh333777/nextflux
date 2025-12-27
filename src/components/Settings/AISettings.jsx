@@ -510,6 +510,34 @@ const AISettings = () => {
 
                 {settings.mcpEnabled && (
                     <div className="space-y-4 pl-4 border-l-2 border-default-200">
+                        <Select
+                            label="MCP 服务提供商"
+                            selectedKeys={
+                                [settings.mcpEndpoint].filter(k =>
+                                    k === "http://usa2.190904.xyz:8766/mcp" ||
+                                    k === "https://url2md-pro.deno.dev"
+                                ).length > 0
+                                    ? [settings.mcpEndpoint]
+                                    : ["custom"]
+                            }
+                            onSelectionChange={(keys) => {
+                                const value = Array.from(keys)[0];
+                                if (value && value !== "custom") {
+                                    updateSettings({ mcpEndpoint: value });
+                                }
+                            }}
+                        >
+                            <SelectItem key="http://usa2.190904.xyz:8766/mcp" value="http://usa2.190904.xyz:8766/mcp">
+                                标准 MCP 服务 (Default)
+                            </SelectItem>
+                            <SelectItem key="https://url2md-pro.deno.dev" value="https://url2md-pro.deno.dev">
+                                URL2MD Pro (Alternative)
+                            </SelectItem>
+                            <SelectItem key="custom" value="custom">
+                                自定义地址
+                            </SelectItem>
+                        </Select>
+
                         <Input
                             label="MCP Endpoint"
                             placeholder="http://192.168.1.x:8765/mcp"

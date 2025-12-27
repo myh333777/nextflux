@@ -23,19 +23,39 @@ const isPlaceholderImage = (url) => {
     return placeholderKeywords.some(keyword => lowerUrl.includes(keyword));
 };
 
-// 图片 URL 代理
-const proxyImageUrl = (url) => {
+// 图片 URL 代理 (支持相对路径转换)
+const proxyImageUrl = (url, baseUrl) => {
     if (!url) return url;
     // 如果已经是代理 URL，不再处理
     if (url.startsWith('/api/image-proxy')) return url;
-    // 如果是 data URL 或相对路径，不处理
-    if (url.startsWith('data:') || url.startsWith('/')) return url;
+    // 如果是 data URL，不处理
+    if (url.startsWith('data:')) return url;
     // 如果是占位符图片，返回空
     if (isPlaceholderImage(url)) return null;
-    return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+
+    // 解码HTML实体 (如 &amp; -> &)
+    let decodedUrl = url
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+
+    // 处理相对路径: 使用 baseUrl 转换为绝对路径
+    let absoluteUrl = decodedUrl;
+    if (baseUrl && !decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
+        try {
+            absoluteUrl = new URL(decodedUrl, baseUrl).toString();
+        } catch (e) {
+            console.warn('Failed to resolve relative URL:', url, 'with base:', baseUrl);
+            return url; // 转换失败则返回原始URL
+        }
+    }
+
+    return `/api/image-proxy?url=${encodeURIComponent(absoluteUrl)}`;
 };
 
-const MarkdownContent = ({ content, className = "" }) => {
+const MarkdownContent = ({ content, baseUrl, className = "" }) => {
     // 自定义渲染组件
     const components = useMemo(() => ({
         // 代码块渲染 - 使用现有 CodeBlock 组件
@@ -56,7 +76,7 @@ const MarkdownContent = ({ content, className = "" }) => {
         },
         // 图片渲染 - 使用代理并复用 ArticleImage
         img({ src, alt, ...props }) {
-            const proxiedSrc = proxyImageUrl(src);
+            const proxiedSrc = proxyImageUrl(src, baseUrl);
             if (!proxiedSrc) return null; // 跳过占位符图片
 
             // 构造类似 domNode 的结构给 ArticleImage
@@ -90,7 +110,7 @@ const MarkdownContent = ({ content, className = "" }) => {
                 </div>
             );
         }
-    }), []);
+    }), [baseUrl]);
 
     if (!content) return null;
 

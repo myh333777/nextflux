@@ -263,6 +263,37 @@ export async function fetchFullContent(url) {
         return { content: "", error: "MCP 功能未启用或 Endpoint 未配置" };
     }
 
+    // 检查是否为 Simple URL-to-Markdown API (如 url2md-pro)
+    if (settings.mcpEndpoint.includes("url2md") || settings.mcpEndpoint.includes("deno.dev")) {
+        try {
+            // 构造请求 URL: GET /api?url=...&bypass=true&images=true
+            const apiBase = settings.mcpEndpoint.replace(/\/+$/, "");
+            const fetchUrl = `${apiBase}/api?url=${encodeURIComponent(url)}&bypass=true&images=true&strategy=auto&format=text`;
+
+            const response = await fetch(fetchUrl);
+            if (!response.ok) {
+                return { success: false, error: `HTTP ${response.status}` };
+            }
+
+            const text = await response.text();
+
+            // 简单的内容验证
+            if (text && text.length > 100) {
+                return {
+                    success: true,
+                    content: text,
+                    title: "", // API 可能不返回单独的标题，通常在第一行
+                    method: "url2md-pro",
+                    isMarkdown: true
+                };
+            }
+            return { success: false, error: "Empty content" };
+
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    }
+
     try {
         // 如果没有 session，先初始化
         if (!mcpSessionId) {
@@ -371,6 +402,29 @@ export async function testMCPConnection() {
 
     if (!settings.mcpEndpoint) {
         return { success: false, error: "MCP Endpoint 未配置" };
+    }
+
+    // 检查是否为 Simple URL-to-Markdown API
+    if (settings.mcpEndpoint.includes("url2md") || settings.mcpEndpoint.includes("deno.dev")) {
+        try {
+            // 简单的连通性测试 (Fetching Google as test)
+            const apiBase = settings.mcpEndpoint.replace(/\/+$/, "");
+            const testUrl = "https://google.com";
+            const fetchUrl = `${apiBase}/api?url=${encodeURIComponent(testUrl)}&format=text`;
+
+            const response = await fetch(fetchUrl);
+            if (response.ok) {
+                return {
+                    success: true,
+                    toolCount: 1,
+                    hasGetArticle: true,
+                    serverInfo: { name: "url2md-pro", version: "1.0" }
+                };
+            }
+            return { success: false, error: `HTTP ${response.status}` };
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
     }
 
     try {
