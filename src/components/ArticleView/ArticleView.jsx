@@ -30,6 +30,7 @@ import Attachments from "@/components/ArticleView/components/Attachments.jsx";
 import ArticleSummary from "@/components/ArticleView/components/ArticleSummary.jsx";
 import ArticleToolbar from "@/components/ArticleView/components/ArticleToolbar.jsx";
 import ChatBubble from "@/components/ArticleView/components/ChatBubble.jsx";
+import MarkdownContent from "@/components/ArticleView/components/MarkdownContent.jsx";
 import { convertHtmlToSimplified, traditionalToSimplified } from "@/utils/t2s.js";
 
 // 占位符图片检测
@@ -76,6 +77,8 @@ const ArticleView = () => {
   const [translateProvider, setTranslateProvider] = useState(null); // 'google' | 'ai'
   // MCP 获取的全文内容
   const [mcpContent, setMcpContent] = useState(null);
+  // MCP 内容是否为 Markdown 格式
+  const [isMcpMarkdown, setIsMcpMarkdown] = useState(false);
   const [translatedTitle, setTranslatedTitle] = useState(null);
   const $activeArticle = useStore(activeArticle);
   const $filteredArticles = useStore(filteredArticles);
@@ -137,6 +140,7 @@ const ArticleView = () => {
     // 3. 重置翻译和 MCP 内容
     setTranslatedContent(null);
     setMcpContent(null);
+    setIsMcpMarkdown(false);
     setTranslatedTitle(null);
     setIsTranslating(false);
     setTranslateProvider(null);
@@ -192,7 +196,7 @@ const ArticleView = () => {
   const displayContent = proxyAllImages(contentWithT2S);
 
   // 处理 MCP 全文更新
-  const handleMcpContentUpdate = async (content) => {
+  const handleMcpContentUpdate = async (content, isMarkdown = false) => {
     // 确保 content 是字符串
     if (typeof content !== 'string') {
       console.error('[MCP] content is not a string:', typeof content, content);
@@ -200,6 +204,7 @@ const ArticleView = () => {
     }
 
     setMcpContent(content);
+    setIsMcpMarkdown(isMarkdown);
 
     // 自动翻译（如果开启）
     const settings = settingsState.get();
@@ -275,8 +280,8 @@ const ArticleView = () => {
           }
 
           if (result.success && result.content) {
-            console.log(`[AutoFetch] MCP 获取成功`);
-            handleMcpContentUpdate(result.content);
+            console.log(`[AutoFetch] MCP 获取成功, isMarkdown: ${result.isMarkdown}`);
+            handleMcpContentUpdate(result.content, result.isMarkdown);
           } else {
             console.log(`[AutoFetch] MCP 获取失败:`, result.error);
           }
@@ -583,130 +588,139 @@ const ArticleView = () => {
                           textAlign: alignJustify ? "justify" : "left",
                         }}
                       >
-                        {parse(displayContent || '', {
-                          replace(domNode) {
-                            if (
-                              domNode.type === "tag" &&
-                              domNode.name === "img"
-                            ) {
-                              return <ArticleImage imgNode={domNode} />;
-                            }
-                            if (domNode.type === "tag" && domNode.name === "a") {
-                              return domNode.children.length > 0
-                                ? handleLinkWithImg(domNode)
-                                : domNode;
-                            }
-                            if (
-                              domNode.type === "tag" &&
-                              domNode.name === "iframe"
-                            ) {
-                              const { src } = domNode.attribs;
-                              domNode.attribs = {
-                                ...domNode.attribs,
-                                referrerpolicy: "strict-origin-when-cross-origin",
-                              };
-
-                              // 判断是否为 Bilibili iframe
-                              const isBilibili = src && src.includes("bilibili");
-
-                              // 如果不是 YouTube iframe,直接返回原始节点
-                              if (!isBilibili) {
-                                return domNode;
+                        {/* 根据内容类型选择渲染方式 */}
+                        {isMcpMarkdown && mcpContent && !translatedContent ? (
+                          // MCP Markdown 内容使用 ReactMarkdown 渲染
+                          <MarkdownContent
+                            content={shouldConvertT2S ? traditionalToSimplified(mcpContent) : mcpContent}
+                          />
+                        ) : (
+                          // HTML 内容使用 html-react-parser 渲染
+                          parse(displayContent || '', {
+                            replace(domNode) {
+                              if (
+                                domNode.type === "tag" &&
+                                domNode.name === "img"
+                              ) {
+                                return <ArticleImage imgNode={domNode} />;
                               }
-
-                              // 如果是 Bilibili iframe, 组装新的iframe
-                              if (isBilibili) {
-                                // 获取bilibili视频 bvid
-                                const bvid = src.match(/bvid=([^&]+)/)?.[1];
-                                if (bvid) {
-                                  return (
-                                    <iframe
-                                      src={`//bilibili.com/blackboard/html5mobileplayer.html?isOutside=true&bvid=${bvid}&p=1&hideCoverInfo=1&danmaku=0`}
-                                      allowFullScreen={true}
-                                    ></iframe>
-                                  );
-                                }
-                                return domNode;
+                              if (domNode.type === "tag" && domNode.name === "a") {
+                                return domNode.children.length > 0
+                                  ? handleLinkWithImg(domNode)
+                                  : domNode;
                               }
-                            }
-                            if (
-                              domNode.type === "tag" &&
-                              domNode.name === "pre"
-                            ) {
-                              // 1. 首先检查是否有code子节点
-                              const codeNode = domNode.children.find(
-                                (child) =>
-                                  child.type === "tag" && child.name === "code",
-                              );
+                              if (
+                                domNode.type === "tag" &&
+                                domNode.name === "iframe"
+                              ) {
+                                const { src } = domNode.attribs;
+                                domNode.attribs = {
+                                  ...domNode.attribs,
+                                  referrerpolicy: "strict-origin-when-cross-origin",
+                                };
 
-                              // 递归获取所有文本内容的辅助函数
-                              const getTextContent = (node) => {
-                                if (!node) return "";
-                                if (node.type === "text") return node.data;
-                                if (node.type === "tag") {
-                                  if (node.name === "br") return "\n";
-                                  // 处理其他标签内的文本
-                                  const childText = node.children
-                                    .map((child) => getTextContent(child))
-                                    .join("");
-                                  // 对于块级元素,在前后添加换行
-                                  if (
-                                    [
-                                      "p",
-                                      "div",
-                                      "h1",
-                                      "h2",
-                                      "h3",
-                                      "h4",
-                                      "h5",
-                                      "h6",
-                                    ].includes(node.name)
-                                  ) {
-                                    return `${childText}\n`;
-                                  }
-                                  return childText;
-                                }
-                                return "";
-                              };
+                                // 判断是否为 Bilibili iframe
+                                const isBilibili = src && src.includes("bilibili");
 
-                              if (codeNode) {
-                                // 2. 处理带有code标签的情况
-                                const className = codeNode.attribs?.class || "";
-                                const language =
-                                  className
-                                    .split(/\s+/)
-                                    .find(
-                                      (cls) =>
-                                        cls.startsWith("language-") ||
-                                        cls.startsWith("lang-"),
-                                    )
-                                    ?.replace(/^(language-|lang-)/, "") || "text";
-
-                                const code = getTextContent(codeNode)
-                                  .replace(/\n{3,}/g, "\n\n") // 将连续3个及以上换行替换为2个
-                                  .trim();
-
-                                return code ? (
-                                  <CodeBlock code={code} language={language} />
-                                ) : (
-                                  domNode
-                                );
-                              } else {
-                                // 3. 处理直接在pre标签中的文本
-                                const code = getTextContent(domNode)
-                                  .replace(/\n{3,}/g, "\n\n")
-                                  .trim();
-
-                                // 如果内容为空则不处理
-                                if (!code) {
+                                // 如果不是 YouTube iframe,直接返回原始节点
+                                if (!isBilibili) {
                                   return domNode;
                                 }
 
-                                return <CodeBlock code={code} language="text" />;
+                                // 如果是 Bilibili iframe, 组装新的iframe
+                                if (isBilibili) {
+                                  // 获取bilibili视频 bvid
+                                  const bvid = src.match(/bvid=([^&]+)/)?.[1];
+                                  if (bvid) {
+                                    return (
+                                      <iframe
+                                        src={`//bilibili.com/blackboard/html5mobileplayer.html?isOutside=true&bvid=${bvid}&p=1&hideCoverInfo=1&danmaku=0`}
+                                        allowFullScreen={true}
+                                      ></iframe>
+                                    );
+                                  }
+                                  return domNode;
+                                }
                               }
-                            }
-                          },
-                        })}
+                              if (
+                                domNode.type === "tag" &&
+                                domNode.name === "pre"
+                              ) {
+                                // 1. 首先检查是否有code子节点
+                                const codeNode = domNode.children.find(
+                                  (child) =>
+                                    child.type === "tag" && child.name === "code",
+                                );
+
+                                // 递归获取所有文本内容的辅助函数
+                                const getTextContent = (node) => {
+                                  if (!node) return "";
+                                  if (node.type === "text") return node.data;
+                                  if (node.type === "tag") {
+                                    if (node.name === "br") return "\n";
+                                    // 处理其他标签内的文本
+                                    const childText = node.children
+                                      .map((child) => getTextContent(child))
+                                      .join("");
+                                    // 对于块级元素,在前后添加换行
+                                    if (
+                                      [
+                                        "p",
+                                        "div",
+                                        "h1",
+                                        "h2",
+                                        "h3",
+                                        "h4",
+                                        "h5",
+                                        "h6",
+                                      ].includes(node.name)
+                                    ) {
+                                      return `${childText}\n`;
+                                    }
+                                    return childText;
+                                  }
+                                  return "";
+                                };
+
+                                if (codeNode) {
+                                  // 2. 处理带有code标签的情况
+                                  const className = codeNode.attribs?.class || "";
+                                  const language =
+                                    className
+                                      .split(/\s+/)
+                                      .find(
+                                        (cls) =>
+                                          cls.startsWith("language-") ||
+                                          cls.startsWith("lang-"),
+                                      )
+                                      ?.replace(/^(language-|lang-)/, "") || "text";
+
+                                  const code = getTextContent(codeNode)
+                                    .replace(/\n{3,}/g, "\n\n") // 将连续3个及以上换行替换为2个
+                                    .trim();
+
+                                  return code ? (
+                                    <CodeBlock code={code} language={language} />
+                                  ) : (
+                                    domNode
+                                  );
+                                } else {
+                                  // 3. 处理直接在pre标签中的文本
+                                  const code = getTextContent(domNode)
+                                    .replace(/\n{3,}/g, "\n\n")
+                                    .trim();
+
+                                  // 如果内容为空则不处理
+                                  if (!code) {
+                                    return domNode;
+                                  }
+
+                                  return <CodeBlock code={code} language="text" />;
+                                }
+                              }
+                            },
+                          })
+                        )}
                         <Attachments article={$activeArticle} />
                       </div>
                     </PhotoProvider>

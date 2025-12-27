@@ -281,9 +281,10 @@ export async function fetchFullContent(url) {
             if (structured.success && structured.content) {
                 return {
                     success: true,
-                    content: formatContentAsHtml(structured.content),
+                    content: structured.content,
                     title: structured.title || "",
-                    method: structured.method || ""
+                    method: structured.method || "",
+                    isMarkdown: true // 标识为 Markdown 格式
                 };
             }
         }
@@ -298,13 +299,14 @@ export async function fetchFullContent(url) {
                     const rawContent = parsed.content || parsed.html || textContent.text;
                     return {
                         success: true,
-                        content: formatContentAsHtml(rawContent),
+                        content: rawContent,
                         title: parsed.title || "",
-                        method: parsed.method || ""
+                        method: parsed.method || "",
+                        isMarkdown: true // 标识为 Markdown 格式
                     };
                 } catch (e) {
-                    // 不是 JSON，直接格式化文本
-                    return { success: true, content: formatContentAsHtml(textContent.text) };
+                    // 不是 JSON，直接返回文本
+                    return { success: true, content: textContent.text, isMarkdown: true };
                 }
             }
         }
@@ -325,14 +327,14 @@ export async function fetchFullContent(url) {
                         if (structured.success && structured.content) {
                             return {
                                 success: true,
-                                content: formatContentAsHtml(structured.content),
+                                content: structured.content,
                                 title: structured.title || "",
-                                method: structured.method || ""
+                                method: structured.method || "",
+                                isMarkdown: true
                             };
                         }
                     }
 
-                    // 旧格式
                     if (result.content && Array.isArray(result.content)) {
                         const textContent = result.content.find(c => c.type === "text");
                         if (textContent) {
@@ -341,12 +343,13 @@ export async function fetchFullContent(url) {
                                 const rawContent = parsed.content || parsed.html || textContent.text;
                                 return {
                                     success: true,
-                                    content: formatContentAsHtml(rawContent),
+                                    content: rawContent,
                                     title: parsed.title || "",
-                                    method: parsed.method || ""
+                                    method: parsed.method || "",
+                                    isMarkdown: true
                                 };
                             } catch (e) {
-                                return { success: true, content: formatContentAsHtml(textContent.text) };
+                                return { success: true, content: textContent.text, isMarkdown: true };
                             }
                         }
                     }

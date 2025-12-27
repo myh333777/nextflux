@@ -101,7 +101,8 @@ const ArticleToolbar = ({
                 setIsTranslated(false);
                 setTranslatedWith(null);
 
-                onContentUpdate?.(result.content);
+                // 传递 isMarkdown 标识
+                onContentUpdate?.(result.content, result.isMarkdown);
                 setFetchSuccess(true);
                 setTimeout(() => setFetchSuccess(false), 5000);
             }
